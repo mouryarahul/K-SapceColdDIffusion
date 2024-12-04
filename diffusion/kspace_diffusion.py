@@ -85,7 +85,7 @@ class KspaceDiffusion(nn.Module):
             denoise_fn,
             *,
             image_size,
-            device_of_kernel,
+            device,
             channels=3,
             timesteps=1000,
             loss_type='l1',
@@ -98,7 +98,7 @@ class KspaceDiffusion(nn.Module):
         self.channels = channels
         self.image_size = image_size
         self.denoise_fn = denoise_fn
-        self.device_of_kernel = device_of_kernel
+        self.device = device
 
         self.num_timesteps = timesteps
         self.loss_type = loss_type
@@ -134,7 +134,7 @@ class KspaceDiffusion(nn.Module):
                 t[i] * step), 1]] = 0.0
 
         mask_expand = torch.nn.functional.interpolate(mask_part, scale_factor=[patch_size_H, patch_size_W],
-                                                      mode='nearest').to(self.device_of_kernel)
+                                                      mode='nearest').to(self.device)
         kspace_part_masked = kspace * mask_expand.unsqueeze(-1).repeat(1, kspace.shape[1], 1, 1, kspace.shape[-1])
         image_part_masked = fastmri.ifft2c(kspace_part_masked)  # [B,Nc,H,W,2]
 
@@ -161,13 +161,13 @@ class KspaceDiffusion(nn.Module):
         # sample masked image and kspace given t
         with torch.no_grad():
             img, kspace = self.q_sample(kspace, mask_seqs, mask, mask_fold,
-                                        torch.full((batch_size,), t, dtype=torch.long).cuda())  # [B,Nc,H,W,2]
+                                        torch.full((batch_size,), t, dtype=torch.long).to(self.device))  # [B,Nc,H,W,2]
         xt = img
         direct_recons = None
         while t:
             step = torch.full((batch_size,), t, dtype=torch.long).cuda()
 
-            x = torch.zeros(xt.shape).to(self.device_of_kernel)
+            x = torch.zeros(xt.shape).to(self.device)
             for i in range(Nc):
                 x[:, i, :] = self.denoise_fn(img[:, i, :].permute(0, 3, 1, 2), step).permute(0, 2, 3, 1)  # [B,Nc,H,W,2]
             k = fastmri.fft2c(x)
@@ -211,7 +211,7 @@ class KspaceDiffusion(nn.Module):
         if self.train_routine == 'Final':
             x_blur, _ = self.q_sample(kspace, mask_seqs, mask, mask_fold, t)  # [B,Nc,H,W,2]
 
-            x_recon = torch.zeros(x_blur.shape).to(self.device_of_kernel)
+            x_recon = torch.zeros(x_blur.shape).to(self.device)
             for i in range(Nc):
                 x_recon[:, i, :] = self.denoise_fn(x_blur[:, i, :].permute(0, 3, 1, 2), t).permute(0, 2, 3,
                                                                                                    1)  # [B,Nc,H,W,2]
